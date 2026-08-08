@@ -55,6 +55,9 @@ class Conversation(models.Model):
     sla_deadline = models.DateTimeField(null=True, blank=True)
     sla_breached = models.BooleanField(default=False)
 
+    # AI handoff — set when the AI hands the conversation to a human (escalation / rate limit)
+    handoff_requested_at = models.DateTimeField(null=True, blank=True)
+
     last_message_at = models.DateTimeField(auto_now_add=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

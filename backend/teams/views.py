@@ -65,22 +65,28 @@ def list_members(request):
     # Annotate open conversation counts per member
     from conversations.models import Conversation
     from django.db.models import Count
-    open_counts = dict(
-        Conversation.objects.filter(
-            organization=org, status__in=["open", "pending"]
+    open_counts = {
+        str(uid): count
+        for uid, count in (
+            Conversation.objects.filter(
+                organization=org, status__in=["open", "pending"]
+            )
+            .exclude(assignee_id=None)
+            .values("assignee_id")
+            .annotate(count=Count("id"))
+            .values_list("assignee_id", "count")
         )
-        .values("assignee_id")
-        .annotate(count=Count("id"))
-        .values_list("assignee_id", "count")
-    )
-    total_counts = dict(
-        Conversation.objects.filter(
-            organization=org
+    }
+    total_counts = {
+        str(uid): count
+        for uid, count in (
+            Conversation.objects.filter(organization=org)
+            .exclude(assignee_id=None)
+            .values("assignee_id")
+            .annotate(count=Count("id"))
+            .values_list("assignee_id", "count")
         )
-        .values("assignee_id")
-        .annotate(count=Count("id"))
-        .values_list("assignee_id", "count")
-    )
+    }
 
     serializer = MembershipSerializer(memberships, many=True)
     data = serializer.data
@@ -398,22 +404,28 @@ def get_team(request, pk):
     from conversations.models import Conversation
     from django.db.models import Count
     team_user_ids = TeamMembership.objects.filter(team=team).values_list("user_id", flat=True)
-    open_counts = dict(
-        Conversation.objects.filter(
-            organization=org, assignee_id__in=team_user_ids, status__in=["open", "pending"]
+    open_counts = {
+        str(uid): count
+        for uid, count in (
+            Conversation.objects.filter(
+                organization=org, assignee_id__in=team_user_ids, status__in=["open", "pending"]
+            )
+            .values("assignee_id")
+            .annotate(count=Count("id"))
+            .values_list("assignee_id", "count")
         )
-        .values("assignee_id")
-        .annotate(count=Count("id"))
-        .values_list("assignee_id", "count")
-    )
-    total_counts = dict(
-        Conversation.objects.filter(
-            organization=org, assignee_id__in=team_user_ids
+    }
+    total_counts = {
+        str(uid): count
+        for uid, count in (
+            Conversation.objects.filter(
+                organization=org, assignee_id__in=team_user_ids
+            )
+            .values("assignee_id")
+            .annotate(count=Count("id"))
+            .values_list("assignee_id", "count")
         )
-        .values("assignee_id")
-        .annotate(count=Count("id"))
-        .values_list("assignee_id", "count")
-    )
+    }
     for m in data.get("members", []):
         uid = m["user"]["id"]
         m["open_conversations"] = open_counts.get(uid, 0)

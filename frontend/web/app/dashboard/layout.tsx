@@ -24,7 +24,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { teamsApi, type UserOrg } from "@/lib/teams-service";
-import { storeUser } from "@/lib/auth-service";
+import { storeUser, updatePresence } from "@/lib/auth-service";
 import { NotificationBell } from "@/components/notification-bell";
 
 const navItems = [
@@ -52,7 +52,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [orgs, setOrgs] = useState<UserOrg[]>([]);
   const [orgMenuOpen, setOrgMenuOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [online, setOnline] = useState(true);
+  const [presenceSaving, setPresenceSaving] = useState(false);
   const orgMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (user) setOnline(Boolean(user.is_online));
+  }, [user?.id]);
 
   useEffect(() => {
     if (loading) return;
@@ -124,6 +130,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const handleLogout = async () => {
     await logout();
     router.push("/signin");
+  };
+
+  const handlePresenceToggle = async (next: boolean) => {
+    const prev = online;
+    setOnline(next);
+    setPresenceSaving(true);
+    try {
+      const updated = await updatePresence(next);
+      if (user) storeUser({ ...user, is_online: updated.is_online });
+    } catch {
+      setOnline(prev);
+    } finally {
+      setPresenceSaving(false);
+    }
   };
 
   return (
@@ -284,10 +304,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   sidebarExpanded ? "w-full px-2" : "w-10 justify-center"
                 }`}
               >
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-accent text-xs font-medium text-accent-foreground">
-                  {user.avatar_url ? (
-                    <img src={user.avatar_url} alt="" className="h-full w-full object-cover" />
-                  ) : initials}
+                <div className="relative">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-accent text-xs font-medium text-accent-foreground">
+                    {user.avatar_url ? (
+                      <img src={user.avatar_url} alt="" className="h-full w-full object-cover" />
+                    ) : initials}
+                  </div>
+                  <span
+                    className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full ring-2 ring-background ${
+                      online ? "bg-emerald-500" : "bg-muted-foreground/70"
+                    }`}
+                  />
                 </div>
                 {sidebarExpanded && (
                   <span className="text-xs font-medium text-ink truncate">{user.name || user.email}</span>
@@ -297,10 +324,45 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {profileOpen && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setProfileOpen(false)} />
-              <div className="absolute left-full bottom-0 z-20 ml-2 w-48 rounded-lg border border-border bg-card p-3 shadow-lg">
+              <div className="absolute left-full bottom-0 z-20 ml-2 w-52 rounded-lg border border-border bg-card p-3 shadow-lg">
                 <div className="border-b border-border pb-2 mb-2">
                   <p className="text-xs font-semibold text-ink">{user.name}</p>
                   <p className="text-[10px] text-muted-foreground">{user.email}</p>
+                </div>
+                <div className="mb-2">
+                  <p className="pb-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                    Status
+                  </p>
+                  <button
+                    onClick={() => handlePresenceToggle(!online)}
+                    disabled={presenceSaving}
+                    className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 transition-colors ${
+                      online ? "bg-emerald-50 dark:bg-emerald-500/10" : "bg-surface-2"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 text-xs font-medium text-ink">
+                      <span
+                        className={`h-2 w-2 rounded-full ${
+                          online ? "bg-emerald-500" : "bg-muted-foreground/70"
+                        }`}
+                      />
+                      {online ? "Online" : "Offline"}
+                    </span>
+                    <span
+                      className={`relative h-4 w-7 rounded-full transition-colors ${
+                        online ? "bg-emerald-500" : "bg-muted-foreground/40"
+                      }`}
+                    >
+                      <span
+                        className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-all ${
+                          online ? "left-3.5" : "left-0.5"
+                        }`}
+                      />
+                    </span>
+                  </button>
+                  <p className="pt-1.5 text-[10px] leading-snug text-muted-foreground">
+                    Offline agents are skipped when Kai auto-assigns conversations.
+                  </p>
                 </div>
                 <button
                   onClick={handleLogout}
@@ -329,11 +391,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <NotificationBell />
           <button
             onClick={() => setProfileOpen(!profileOpen)}
-            className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-accent text-xs font-medium text-accent-foreground"
+            className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-accent text-xs font-medium text-accent-foreground"
           >
             {user.avatar_url ? (
               <img src={user.avatar_url} alt="" className="h-full w-full object-cover" />
             ) : initials}
+            <span
+              className={`absolute bottom-0 right-0 h-2 w-2 rounded-full ring-2 ring-card ${
+                online ? "bg-emerald-500" : "bg-muted-foreground/70"
+              }`}
+            />
           </button>
         </div>
       </div>

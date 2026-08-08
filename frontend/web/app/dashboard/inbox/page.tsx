@@ -1,6 +1,6 @@
 "use client";
 
-import { Search, Send, Phone, Mail, MoreHorizontal, Loader2, ChevronDown, ChevronRight, UserCheck, StickyNote, Paperclip, Sparkles, Smile, Bot, MessageSquare, FileText, Globe, Clock, Monitor, Tag, Languages, Archive, Star, Trash2, UserPlus, Hash, Copy, ArrowRight } from "lucide-react";
+import { Search, Send, Phone, Mail, MoreHorizontal, Loader2, ChevronDown, ChevronRight, UserCheck, StickyNote, Paperclip, Sparkles, Smile, Bot, MessageSquare, FileText, Globe, Clock, Monitor, Tag, Languages, Archive, Star, Trash2, UserPlus, Hash, Copy, ArrowRight, RefreshCcw } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/components/toast";
@@ -24,6 +24,7 @@ import {
 import { SLABadge } from "@/components/sla-badge";
 import {
   suggestReply,
+  generateReplyOptions,
   summarizeConversation,
   getNextSteps,
 } from "@/lib/ai-service";
@@ -63,8 +64,11 @@ export default function InboxPage() {
   const [copilotMessages, setCopilotMessages] = useState<{ role: "user" | "assistant"; text: string }[]>([]);
   const [copilotLoading, setCopilotLoading] = useState(false);
   const copilotEndRef = useRef<HTMLDivElement>(null);
-  const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
-  const [aiSuggestionsLoading, setAiSuggestionsLoading] = useState(false);
+  const [aiReplyOptions, setAiReplyOptions] = useState<string[]>([]);
+  const [aiReplyLanguage, setAiReplyLanguage] = useState<string>("en");
+  const [aiReplyLoading, setAiReplyLoading] = useState(false);
+  const [aiReplyError, setAiReplyError] = useState("");
+  const [aiReplySelected, setAiReplySelected] = useState<number | null>(null);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -322,22 +326,28 @@ export default function InboxPage() {
     }
   };
 
-  const handleAiSuggestions = async () => {
-    if (!activeId || aiSuggestionsLoading) return;
-    setAiSuggestionsLoading(true);
+  const loadAiReplyOptions = async (selectedId: string | null = null) => {
+    const convId = selectedId || activeId;
+    if (!convId || aiReplyLoading) return;
+    setAiReplyLoading(true);
+    setAiReplyError("");
+    setAiReplySelected(null);
     try {
-      const res = await suggestReply(activeId);
-      setAiSuggestions(res.suggestions);
+      const res = await generateReplyOptions(convId);
+      setAiReplyOptions(res.options);
+      setAiReplyLanguage(res.language);
     } catch {
-      setAiSuggestions([]);
+      setAiReplyOptions([]);
+      setAiReplyError("AI couldn't generate a reply. Please try again.");
     } finally {
-      setAiSuggestionsLoading(false);
+      setAiReplyLoading(false);
     }
   };
 
-  const applySuggestion = (text: string) => {
+  const useAiReplyOption = (text: string) => {
     setReplyText(text);
-    setAiSuggestions([]);
+    setAiReplyOptions([]);
+    setAiReplySelected(null);
   };
 
   const copilotSuggestions = [
@@ -908,27 +918,104 @@ export default function InboxPage() {
 
               {/* Reply input */}
               <div className="border-t border-border px-3 py-2.5">
-                {/* AI Suggestion chips */}
-                {aiSuggestions.length > 0 && (
-                  <div className="mb-2 space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-medium text-accent flex items-center gap-1">
-                        <Sparkles className="h-3 w-3" /> AI Suggestions
-                      </span>
-                      <button onClick={() => setAiSuggestions([])} className="text-[10px] text-muted-foreground hover:text-ink">Clear</button>
-                    </div>
-                    {aiSuggestions.map((s, i) => (
-                      <button
-                        key={i}
-                        onClick={() => applySuggestion(s)}
-                        className="group flex w-full items-start gap-2 rounded-lg border border-accent/20 bg-accent/5 p-2.5 text-left transition-colors hover:border-accent/40 hover:bg-accent/10"
-                      >
-                        <p className="flex-1 text-xs text-ink leading-relaxed line-clamp-3">{s}</p>
-                        <ArrowRight className="h-3.5 w-3.5 shrink-0 mt-0.5 text-accent opacity-0 group-hover:opacity-100 transition-opacity" />
-                      </button>
-                    ))}
+                {/* AI Reply options */}
+                {aiReplyLoading ? (
+                  <div className="mb-2 flex items-center gap-2 rounded-lg border border-accent/20 bg-accent/5 px-3 py-2.5">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
+                    <span className="text-xs text-muted-foreground">
+                      Kai is drafting two replies...
+                    </span>
                   </div>
-                )}
+                ) : aiReplyError ? (
+                  <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5">
+                    <span className="text-xs text-red-600">{aiReplyError}</span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => loadAiReplyOptions()}
+                        className="text-[10px] font-medium text-red-600 hover:underline"
+                      >
+                        Retry
+                      </button>
+                      <button
+                        onClick={() => { setAiReplyError(""); setAiReplyOptions([]); }}
+                        className="text-[10px] text-muted-foreground hover:text-ink"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                ) : aiReplyOptions.length > 0 ? (
+                  <div className="mb-2">
+                    <div className="mb-1.5 flex items-center justify-between">
+                      <span className="flex items-center gap-1 text-[10px] font-medium text-accent">
+                        <Sparkles className="h-3 w-3" />
+                        Kai&apos;s drafts
+                        {aiReplyLanguage && aiReplyLanguage !== "en" && (
+                          <span className="rounded bg-accent/10 px-1 py-px font-mono uppercase tracking-wider">
+                            {aiReplyLanguage}
+                          </span>
+                        )}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => loadAiReplyOptions()}
+                          disabled={aiReplyLoading}
+                          className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-50"
+                        >
+                          <RefreshCcw className="h-3 w-3" />
+                          Regenerate
+                        </button>
+                        <button
+                          onClick={() => { setAiReplyOptions([]); setAiReplySelected(null); }}
+                          className="rounded-md px-2 py-1 text-[10px] text-muted-foreground hover:text-ink"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-1.5 lg:grid-cols-2">
+                      {aiReplyOptions.map((text, i) => (
+                        <div
+                          key={i}
+                          className={`group flex flex-col rounded-lg border p-2.5 transition-colors ${
+                            aiReplySelected === i
+                              ? "border-accent/50 bg-accent/10"
+                              : "border-accent/20 bg-accent/5 hover:border-accent/40"
+                          }`}
+                        >
+                          <p className="flex-1 text-xs text-ink leading-relaxed whitespace-pre-wrap line-clamp-4">
+                            {text}
+                          </p>
+                          <div className="mt-2 flex justify-end gap-1">
+                            {aiReplySelected === i ? (
+                              <>
+                                <button
+                                  onClick={() => setAiReplySelected(null)}
+                                  className="rounded-md px-2 py-1 text-[10px] font-medium text-muted-foreground hover:bg-surface-2"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  onClick={() => useAiReplyOption(text)}
+                                  className="rounded-md bg-accent px-2 py-1 text-[10px] font-semibold text-accent-foreground hover:opacity-90"
+                                >
+                                  Use & edit
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                onClick={() => setAiReplySelected(i)}
+                                className="rounded-md border border-border px-2 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:border-ink hover:text-ink"
+                              >
+                                Select
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
 
                 {/* Mode toggle + action buttons */}
                 <div className="mb-2 flex items-center justify-between">
@@ -958,12 +1045,12 @@ export default function InboxPage() {
                       <Paperclip className="h-3.5 w-3.5" />
                     </button>
                     <button
-                      onClick={handleAiSuggestions}
-                      disabled={aiSuggestionsLoading}
+                      onClick={() => loadAiReplyOptions()}
+                      disabled={aiReplyLoading}
                       className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/10 hover:text-accent transition-colors disabled:opacity-50"
-                      title="AI Suggest Reply"
+                      title="Draft reply with Kai"
                     >
-                      {aiSuggestionsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                      {aiReplyLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
                     </button>
                     <button className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-2 hover:text-ink transition-colors" title="Emoji">
                       <Smile className="h-3.5 w-3.5" />

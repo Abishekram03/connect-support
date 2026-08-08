@@ -224,12 +224,22 @@ def generate_reply(
     natural_guidance = (
         "You are having a real-time chat conversation. Be natural, helpful, and human.\n\n"
         "HOW TO BEHAVE:\n"
-        "- Greet the customer warmly but briefly. Don't over-explain what you can do.\n"
-        "- Listen to what they actually say. Respond to THEIR question, not a script.\n"
-        "- Ask clarifying questions when you need more detail to help — just like a human agent would.\n"
+        "- Acknowledge the customer's message and answer it directly with what you know.\n"
+        "- If you need more details to help, ask one targeted question — just like a human agent would.\n"
+        "- If you don't know the answer, say so honestly and offer to connect them with a human agent ONCE. "
+        "Never claim you have already transferred or escalated the conversation — you cannot do that. "
+        "Never write phrases like \"I've initiated a transfer\", \"I've connected you to a human\", or "
+        "\"I've been trying to transfer you\" — you haven't, and it confuses the customer. "
+        "If you already offered a human handoff in a previous message, do not repeat that offer; "
+        "instead do your best to answer with what you know.\n"
         "- If they ask something you can answer from context, answer it directly.\n"
-        "- If you don't know, say so honestly and offer to connect them with a human.\n"
-        "- If the conversation is going well and you need their name or email to help them further (e.g. to create a ticket, follow up, or personalize the chat), ask for it casually — like a human would mid-conversation, not like a form.\n"
+        "- Write like a real person in a chat: plain, direct, friendly. NEVER write robotic or meta phrasing "
+        "such as \"I understand you're trying to ask about X\", \"I'd like to clarify\", \"let me clarify once more\", "
+        "\"to better assist you\", \"please let me know if you have any other questions\". Don't comment on the "
+        "conversation itself — just answer the question.\n"
+        "- If the conversation is going well and you need their name or email to help them further "
+        "(e.g. to create a ticket, follow up, or personalize the chat), ask for it casually — like a human "
+        "would mid-conversation, not like a form.\n"
         "- Never repeat yourself. Never give the same answer twice.\n"
         "- Keep replies concise. Match the customer's energy — short question, short answer.\n"
         "- You can ask follow-up questions to better understand their issue.\n"
@@ -239,7 +249,7 @@ def generate_reply(
     messages = [
         {
             "role": "system",
-            "content": f"{system_prompt}\n\nUse the following context to answer the customer's question. If the context doesn't contain enough information, say you'll connect them with a human agent. Never make up information. {lang_instruction} {natural_guidance}\n\n<context>\n{context}\n</context>",
+            "content": f"{system_prompt}\n\nUse the following context to answer the customer's question. If the context doesn't contain enough information, answer helpfully with what you know and offer a human handoff at most once. Never make up information. {lang_instruction} {natural_guidance}\n\n<context>\n{context}\n</context>",
         }
     ]
 
@@ -299,7 +309,100 @@ def generate_reply(
     }
 
 
-def suggest_reply(org, conversation_messages: list[dict], provider: OpenRouterProvider, config: AIConfig) -> list[str]:
+def generate_reply_options(
+    org,
+    conversation_messages: list[dict],
+    provider: OpenRouterProvider,
+    config: AIConfig,
+    agent_language: str = "en",
+    human_engaged: bool = False,
+) -> list[str]:
+    """
+    Generate 2 distinct draft replies for an agent to choose from.
+    Returns exactly 2 strings, always in the agent's language.
+    """
+    import json as _json
+
+    conversation_text = "\n".join(
+        f"{'Customer' if msg.get('is_from_customer') else 'Agent'}: {msg['body']}"
+        for msg in conversation_messages[-20:]
+    )
+
+    lang_name = _language_name(agent_language)
+    engaged_guidance = (
+        "The customer asked (or was promised) to be connected to a real person — YOU ARE that person now. "
+        "So never say you'll transfer/connect them to someone, never promise a teammate will join, and never "
+        "describe the conversation as still being handled by an AI. If they asked for a human, acknowledge "
+        "they now have one and help them directly with their actual question."
+        if human_engaged
+        else ""
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                f"You are the customer support agent writing a chat reply to a customer. "
+                f"Write 2 different replies the agent would actually send, AS the agent — first person, "
+                f"speaking like a real person in a support chat, NOT like an AI assistant. "
+                f"{engaged_guidance} "
+                f"Both drafts MUST be written in {lang_name} ({agent_language}). "
+                f"Make them distinct: draft 1 concise and direct, draft 2 warm and thorough. "
+                f"Never write like a template or chatbot: no 'I understand you're trying to ask about…', "
+                f"no 'I'd like to clarify', no 'please let me know if you have any other questions', "
+                f"no 'I'm here to help', no meta-commentary about the conversation itself. "
+                f"Read the customer's latest message and just answer it like a helpful co-worker would. "
+                f"Keep each under 120 words. "
+                f"Do NOT translate to any other language. "
+                f"Return them as a JSON array of exactly 2 strings. Only return the JSON array, no other text."
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"Conversation:\n{conversation_text}",
+        },
+    ]
+
+    result = provider.chat(messages, temperature=0.8)
+
+    try:
+        content = result["content"]
+        match = re.search(r"\[.*\]", content, re.DOTALL)
+        if match:
+            options = _json.loads(match.group())
+            if isinstance(options, list) and len(options) >= 2:
+                return [str(s).strip() for s in options[:2]]
+    except (_json.JSONDecodeError, AttributeError):
+        pass
+
+    lines = [l.strip() for l in result["content"].split("\n") if l.strip()]
+    if len(lines) >= 2:
+        return lines[:2]
+
+    return [
+        "Thank you for reaching out. I understand what you need and I'm on it — I'll get back to you shortly with a solution.",
+        "Thanks for letting us know. I've looked at your message and here's what I can do for you right away.",
+    ]
+
+
+def _language_name(code: str) -> str:
+    """Return a human-friendly language name for a language code."""
+    names = {
+        "en": "English", "es": "Spanish", "fr": "French", "de": "German", "ja": "Japanese",
+        "ko": "Korean", "zh-Hans": "Simplified Chinese", "zh-Hant": "Traditional Chinese",
+        "ar": "Arabic", "hi": "Hindi", "pt": "Portuguese", "pt-BR": "Portuguese (Brazil)",
+        "ru": "Russian", "it": "Italian", "nl": "Dutch", "sv": "Swedish", "no": "Norwegian",
+        "pl": "Polish", "tr": "Turkish", "vi": "Vietnamese", "th": "Thai", "id": "Indonesian",
+        "uk": "Ukrainian", "cs": "Czech", "el": "Greek", "he": "Hebrew", "ro": "Romanian",
+        "hu": "Hungarian", "da": "Danish", "fi": "Finnish", "bn": "Bengali", "tl": "Tagalog",
+        "ur": "Urdu", "ms": "Malay", "sq": "Albanian", "az": "Azerbaijani", "bg": "Bulgarian",
+        "ca": "Catalan", "et": "Estonian", "gl": "Galician", "ga": "Irish", "ky": "Kyrgyz",
+        "lv": "Latvian", "lt": "Lithuanian", "nb": "Norwegian", "fa": "Persian", "sk": "Slovak",
+        "sl": "Slovenian", "sw": "Swahili", "eo": "Esperanto", "eu": "Basque",
+    }
+    return names.get(code, code)
+
+
+def suggest_reply(org, conversation_messages: list[dict], provider: OpenRouterProvider, config: AIConfig, human_engaged: bool = False) -> list[str]:
     """Generate 3 suggested replies for an agent. Returns list of 3 strings."""
     # Build context from conversation
     conversation_text = "\n".join(
@@ -307,15 +410,26 @@ def suggest_reply(org, conversation_messages: list[dict], provider: OpenRouterPr
         for msg in conversation_messages[-20:]
     )
 
+    engaged_guidance = (
+        "The customer asked (or was promised) to be connected to a real person — YOU ARE that person now. "
+        "Never say you'll transfer/connect them to someone or promise a teammate will join. "
+        "If they asked for a human, acknowledge they now have one and help them directly."
+        if human_engaged
+        else ""
+    )
+
     messages = [
         {
             "role": "system",
             "content": (
-                "You are an AI assistant helping a customer support agent. "
-                "Based on the conversation below, suggest 3 different reply options the agent could send. "
+                "You are the customer support agent preparing replies to send in a chat. "
+                "Write 3 different replies the agent would send, AS the agent — first person, natural human "
+                "chat voice, NOT an AI assistant. "
+                f"{engaged_guidance} "
                 "Return them as a JSON array of 3 strings. Each reply should have a different tone: "
                 "1) Professional and concise, 2) Friendly and detailed, 3) Empathetic and solution-focused. "
-                "Only return the JSON array, no other text."
+                "Avoid robot phrases like 'I understand you're trying to ask about', 'I'd like to clarify', "
+                "or 'I'm here to help'. Only return the JSON array, no other text."
             ),
         },
         {

@@ -65,6 +65,9 @@ def _validate_session_token(conversation, session_token):
     return conversation.session_token == session_token
 
 
+MAX_ASSIGNED_CONVERSATIONS = 5
+
+
 def _auto_assign_new_conversation(conversation):
     """Auto-assign a new conversation to the least busy agent."""
     try:
@@ -86,6 +89,11 @@ def _auto_assign_new_conversation(conversation):
         ).values_list("id", flat=True)
         all_agent_ids = list(set(list(agent_ids) + list(org_admin_ids)))
 
+        # Only consider agents who are online
+        all_agent_ids = list(
+            User.objects.filter(id__in=all_agent_ids, is_online=True).values_list("id", flat=True)
+        )
+
         if not all_agent_ids:
             return
 
@@ -98,8 +106,16 @@ def _auto_assign_new_conversation(conversation):
             .annotate(count=Count("id"))
             .order_by("count")
         )
+        # Agents who still have capacity (under MAX_ASSIGNED_CONVERSATIONS open conversations)
+        capped_ids = {
+            c["assignee_id"] for c in agent_counts if c["count"] >= MAX_ASSIGNED_CONVERSATIONS
+        }
+        eligible_ids = [aid for aid in all_agent_ids if aid not in capped_ids]
+        if not eligible_ids:
+            return  # Everyone is at capacity — leave it for manual dispatch
+
         assigned_ids = {c["assignee_id"] for c in agent_counts}
-        for agent_id in all_agent_ids:
+        for agent_id in eligible_ids:
             if agent_id not in assigned_ids:
                 conversation.assignee_id = agent_id
                 break
@@ -108,7 +124,42 @@ def _auto_assign_new_conversation(conversation):
                 conversation.assignee_id = agent_counts[0]["assignee_id"]
 
         conversation.assigned_at = timezone.now()
-        conversation.save(update_fields=["assignee", "assigned_at"])
+        update_fields = ["assignee", "assigned_at"]
+        if conversation.assignee_id and not conversation.team_id:
+            # Prefer the configured auto-assign team; fall back to the agent's first team
+            try:
+                from ai_service.models import AIConfig
+                ai_config = AIConfig.objects.filter(organization=org).first()
+                team_id = ai_config.auto_assign_team_id if ai_config else None
+                if team_id:
+                    conversation.team_id = team_id
+                else:
+                    team_member = TeamMembership.objects.filter(
+                        user_id=conversation.assignee_id, team__organization=org
+                    ).first()
+                    if team_member:
+                        conversation.team_id = team_member.team_id
+                update_fields.append("team")
+            except Exception:
+                pass
+        conversation.save(update_fields=update_fields)
+
+        # Notify the assigned agent
+        if conversation.assignee_id:
+            try:
+                from notifications.views import create_notification
+                assigned_user = User.objects.get(pk=conversation.assignee_id)
+                create_notification(
+                    org=conversation.organization,
+                    notification_type="new_conversation",
+                    title=f"New conversation assigned to you: {conversation.customer_name or f'Visitor #{conversation.ticket_id}'}",
+                    body=f"You have been assigned a new conversation — {conversation.customer_name or 'a visitor'} is waiting",
+                    conversation=conversation,
+                    recipient=assigned_user,
+                )
+            except Exception:
+                pass
+
     except Exception:
         pass
 
@@ -155,14 +206,35 @@ def _auto_assign_escalation(conversation):
         ).values_list("id", flat=True)
         all_agent_ids = list(set(list(agent_ids) + list(org_admin_ids)))
 
+        # Only consider agents who are online
+        all_agent_ids = list(
+            User.objects.filter(id__in=all_agent_ids, is_online=True).values_list("id", flat=True)
+        )
+
         if not all_agent_ids:
             return
+
+        # Only consider agents with remaining capacity
+        open_counts = (
+            Conversation.objects.filter(
+                assignee_id__in=all_agent_ids,
+                status__in=["open", "pending"],
+            )
+            .values("assignee_id")
+            .annotate(count=Count("id"))
+        )
+        count_by_agent = {c["assignee_id"]: c["count"] for c in open_counts}
+        eligible_ids = [
+            aid for aid in all_agent_ids if count_by_agent.get(aid, 0) < MAX_ASSIGNED_CONVERSATIONS
+        ]
+        if not eligible_ids:
+            return  # Everyone is at capacity — do not overload an agent
 
         if ai_config.auto_assign_routing == "least_busy":
             # Find agent with fewest active conversations
             agent_counts = (
                 Conversation.objects.filter(
-                    assignee_id__in=all_agent_ids,
+                    assignee_id__in=eligible_ids,
                     status__in=["open", "pending"],
                 )
                 .values("assignee_id")
@@ -170,7 +242,7 @@ def _auto_assign_escalation(conversation):
                 .order_by("count")
             )
             assigned_ids = {c["assignee_id"] for c in agent_counts}
-            for agent_id in all_agent_ids:
+            for agent_id in eligible_ids:
                 if agent_id not in assigned_ids:
                     conversation.assignee_id = agent_id
                     break
@@ -178,18 +250,18 @@ def _auto_assign_escalation(conversation):
                 if agent_counts:
                     conversation.assignee_id = agent_counts[0]["assignee_id"]
         else:
-            # Round-robin: pick the agent who was assigned least recently
+            # Round-robin: pick the eligible agent who was assigned least recently
             from django.db.models import Max
             last_assigned = (
                 Conversation.objects.filter(
-                    assignee_id__in=all_agent_ids,
+                    assignee_id__in=eligible_ids,
                 )
                 .values("assignee_id")
                 .annotate(last_assigned=Max("assigned_at"))
                 .order_by("last_assigned")
             )
             assigned_set = {c["assignee_id"] for c in last_assigned}
-            for agent_id in all_agent_ids:
+            for agent_id in eligible_ids:
                 if agent_id not in assigned_set:
                     conversation.assignee_id = agent_id
                     break
@@ -198,7 +270,22 @@ def _auto_assign_escalation(conversation):
                     conversation.assignee_id = last_assigned[0]["assignee_id"]
 
         conversation.assigned_at = timezone.now()
-        conversation.save(update_fields=["assignee", "team", "assigned_at", "priority"])
+        update_fields = ["assignee", "team", "assigned_at", "priority"]
+        if not conversation.team_id:
+            # Prefer the configured auto-assign team; fall back to the agent's first team
+            try:
+                team_id = target_team_id
+                if not team_id:
+                    team_member = TeamMembership.objects.filter(
+                        user_id=conversation.assignee_id, team__organization=conversation.organization
+                    ).first()
+                    if team_member:
+                        team_id = team_member.team_id
+                if team_id:
+                    conversation.team_id = team_id
+            except Exception:
+                pass
+        conversation.save(update_fields=update_fields)
 
         # Notify the assigned agent specifically
         if conversation.assignee_id:
@@ -501,7 +588,13 @@ def conversation_messages(request, pk):
         from ai_service.rag import get_provider, generate_reply
 
         ai_config = AIConfig.objects.filter(organization=conversation.organization).first()
-        if ai_config and ai_config.auto_reply_enabled:
+        # A human is now engaged (agent already replied) or the AI already handed
+        # the conversation to a human — never have the AI talk over them.
+        if not ai_config or not ai_config.auto_reply_enabled:
+            pass
+        elif conversation.first_response_at or conversation.handoff_requested_at:
+            pass
+        else:
             # Per-org AI rate limit
             if not _check_org_ai_rate(org_id):
                 ai_reply_data = {"escalate": True, "reason": "rate_limit_exceeded"}
@@ -519,6 +612,9 @@ def conversation_messages(request, pk):
                     pass
                 # Auto-assign to agent if configured
                 _auto_assign_escalation(conversation)
+                # Mark handoff so the AI never replies again in this conversation
+                conversation.handoff_requested_at = timezone.now()
+                conversation.save(update_fields=["handoff_requested_at"])
             else:
                 provider = get_provider(conversation.organization)
 
@@ -544,6 +640,24 @@ def conversation_messages(request, pk):
                     conversation.organization, body, history, provider, ai_config,
                     agent_language=agent_language,
                 )
+
+                # Log this AI reply for analytics
+                try:
+                    from ai_service.models import AIReplyLog
+                    AIReplyLog.objects.create(
+                        conversation=conversation,
+                        organization=conversation.organization,
+                        model_used=getattr(provider, "model", "unknown"),
+                        prompt_tokens=result.get("prompt_tokens", 0),
+                        completion_tokens=result.get("completion_tokens", 0),
+                        confidence=result.get("confidence", 0),
+                        escalated=bool(result["escalate"]),
+                        escalation_reason=result.get("escalation_reason", ""),
+                        sources_used=result.get("sources", []),
+                        response_text=result.get("content", "")[:5000],
+                    )
+                except Exception:
+                    pass
 
                 if not result["escalate"]:
                     ai_message = Message.objects.create(
@@ -609,6 +723,33 @@ def conversation_messages(request, pk):
 
                     # Auto-assign to agent if configured
                     _auto_assign_escalation(conversation)
+                    # Mark handoff so the AI never replies again in this conversation
+                    conversation.handoff_requested_at = timezone.now()
+                    conversation.save(update_fields=["handoff_requested_at"])
+
+                    # Option B: all agents busy/at capacity — customer is queued
+                    if not conversation.assignee_id:
+                        queue_msg = (
+                            "Thanks for waiting! All our agents are currently helping other customers, "
+                            "so I've queued your conversation — we'll connect you with someone as soon "
+                            "as one is free."
+                        )
+                        try:
+                            from ai_service.translation import translate_text
+                            customer_lang = result.get("detected_language") or "en"
+                            if customer_lang != "en":
+                                translated_q = translate_text(queue_msg, "en", customer_lang)
+                                if translated_q and translated_q != queue_msg:
+                                    queue_msg = translated_q
+                        except Exception:
+                            pass
+                        if ai_message:
+                            ai_message.body = queue_msg
+                            ai_message.original_body = ""
+                            ai_message.save(update_fields=["body", "original_body"])
+                            if ai_reply_data:
+                                ai_reply_data["body"] = queue_msg
+                                ai_reply_data["original_body"] = ""
     except Exception:
         pass  # Don't break the widget flow if AI fails
 

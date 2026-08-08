@@ -54,6 +54,15 @@ export const WidgetChatScreen = ({ mode = "production" }: Props) => {
   const lastTimestampRef = useRef<string>("");
   const [customerName, setCustomerName] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
+  const [connState, setConnState] = useState<{
+    state: "ai" | "connecting" | "connected" | "queued";
+    name?: string;
+  }>({ state: "ai" });
+  const connectedAnnounced = useRef(false);
+
+  useEffect(() => {
+    connectedAnnounced.current = false;
+  }, [conversationId]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
@@ -123,6 +132,53 @@ export const WidgetChatScreen = ({ mode = "production" }: Props) => {
       if (pollingRef.current) clearTimeout(pollingRef.current);
     };
   }, [conversationId, hasStarted]);
+
+  // Poll conversation status to show when a human agent connects
+  useEffect(() => {
+    if (!orgId) return;
+    let cancelled = false;
+
+    const check = async () => {
+      try {
+        const list = await fetchConversations(undefined, orgId);
+        if (cancelled) return;
+        const conv = list.find((c) => c.id === conversationIdRef.current);
+        if (!conv) return;
+        if (conv.first_response_at) {
+          const name = conv.assignee?.name || "Agent";
+          setConnState({ state: "connected", name });
+          if (!connectedAnnounced.current) {
+            connectedAnnounced.current = true;
+            const sysMsg: MessageResponse = {
+              id: `sys-conn-${Date.now()}`,
+              type: "system",
+              body: `You're now connected with ${name}`,
+              original_body: "",
+              sender: null,
+              sender_name: "System",
+              is_from_customer: false,
+              read_at: null,
+              created_at: new Date().toISOString(),
+            };
+            setMessages((prev) => [...prev, sysMsg]);
+          }
+        } else if (conv.handoff_requested_at) {
+          if (conv.assignee) {
+            setConnState({ state: "connecting" });
+          } else {
+            setConnState({ state: "queued" });
+          }
+        }
+      } catch {}
+    };
+
+    check();
+    const timer = setInterval(check, 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [orgId, hasStarted]);
 
   // Create conversation on first message
   useEffect(() => {
@@ -330,9 +386,26 @@ export const WidgetChatScreen = ({ mode = "production" }: Props) => {
           <BrandLogo size={32} />
           <div>
             <p className="text-lg font-semibold text-neutral-900">{widgetConfig.companyName || "Support"}</p>
-            <p className="text-[12px] leading-tight text-neutral-500">
-              Support Team
-            </p>
+            {connState.state === "connected" ? (
+              <p className="flex items-center gap-1 text-[12px] leading-tight text-neutral-600">
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                {connState.name} connected
+              </p>
+            ) : connState.state === "connecting" ? (
+              <p className="flex items-center gap-1 text-[12px] leading-tight text-neutral-600">
+                <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />
+                Connecting you to an agent…
+              </p>
+            ) : connState.state === "queued" ? (
+              <p className="flex items-center gap-1 text-[12px] leading-tight text-neutral-600">
+                <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />
+                Agents busy — you're in the queue
+              </p>
+            ) : (
+              <p className="text-[12px] leading-tight text-neutral-500">
+                Support Team
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -352,8 +425,15 @@ export const WidgetChatScreen = ({ mode = "production" }: Props) => {
         )}
 
         {messages.map((msg) => (
+          <div key={msg.id}>
+            {msg.type === "system" ? (
+              <div className="flex justify-center px-2 py-1">
+                <p className="max-w-[90%] rounded-full bg-neutral-100 px-3 py-1 text-center text-[10px] text-neutral-500">
+                  {msg.body}
+                </p>
+              </div>
+            ) : (
           <div
-            key={msg.id}
             className={`flex gap-2 ${msg.is_from_customer ? "justify-end" : "justify-start"}`}
           >
             {!msg.is_from_customer && (
@@ -396,6 +476,8 @@ export const WidgetChatScreen = ({ mode = "production" }: Props) => {
                 })}
               </p>
             </div>
+          </div>
+            )}
           </div>
         ))}
 

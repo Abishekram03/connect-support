@@ -26,7 +26,7 @@ def notification_list(request):
         except (ValueError, TypeError):
             pass
 
-    limit = min(int(request.query_params.get("limit", 20)), 50)
+    limit = min(int(request.query_params.get("limit", 8)), 50)
     notifications = qs[:limit]
     serializer = NotificationSerializer(notifications, many=True)
     return Response({"results": serializer.data})

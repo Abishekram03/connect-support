@@ -290,6 +290,11 @@ def me(request):
         request.user.language = language
         request.user.save(update_fields=["language"])
 
+    is_online = request.data.get("is_online")
+    if is_online is not None:
+        request.user.is_online = bool(is_online)
+        request.user.save(update_fields=["is_online"])
+
     return Response(UserSerializer(request.user).data)
 
 

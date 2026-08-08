@@ -91,6 +91,9 @@ export interface ConversationListItem {
   subject: string;
   customer_name: string;
   customer_email: string;
+  assignee: { id: string; email: string; name: string; is_online: boolean } | null;
+  first_response_at: string | null;
+  handoff_requested_at: string | null;
   last_message: { id: string; body: string; created_at: string; is_from_customer: boolean } | null;
   message_count: number;
   last_message_at: string;

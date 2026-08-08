@@ -23,12 +23,17 @@ export function useNotifications() {
 
   const checkNotifications = useCallback(async () => {
     try {
-      const res = await api.get<{ results: Notification[] }>("/api/notifications", {
-        params: { after: lastCheckRef.current, limit: "20" },
-      });
+      // First check loads history (no `after`) so notifications persist after refresh;
+      // subsequent polls only fetch what's new.
+      const params: Record<string, string> = { limit: "8" };
+      if (!isFirstCheck.current) {
+        params["after"] = lastCheckRef.current;
+      }
+      const res = await api.get<{ results: Notification[] }>("/api/notifications", { params });
       const newNotifs = res.results || [];
+      const isFirst = isFirstCheck.current;
       // Play sound on new notifications (skip first check to avoid sound on page load)
-      if (!isFirstCheck.current && newNotifs.length > 0 && localStorage.getItem("notification_sound") !== "off") {
+      if (!isFirst && newNotifs.length > 0 && localStorage.getItem("notification_sound") !== "off") {
         const hasEscalation = newNotifs.some((n) => n.type === "escalation");
         if (hasEscalation) {
           playEscalationSound();
@@ -40,11 +45,11 @@ export function useNotifications() {
       setNotifications((prev) => {
         const existing = new Set(prev.map((n) => n.id));
         const fresh = newNotifs.filter((n) => !existing.has(n.id));
-        return [...fresh, ...prev].slice(0, 50);
+        return [...fresh, ...prev].slice(0, 8);
       });
       setUnreadCount((prev) => {
-        const newUnread = newNotifs.filter((n) => !n.read).length;
-        return prev + newUnread;
+        const freshUnread = newNotifs.filter((n) => !n.read).length;
+        return isFirst ? freshUnread : prev + freshUnread;
       });
       lastCheckRef.current = new Date().toISOString();
     } catch {}

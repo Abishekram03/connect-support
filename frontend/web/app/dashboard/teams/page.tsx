@@ -418,9 +418,15 @@ export default function TeamsPage() {
                           : "hover:bg-surface-2"
                       }`}
                     >
-                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-accent/20 text-xs font-medium text-accent">
+                      <div className="relative flex h-9 w-9 items-center justify-center rounded-full bg-accent/20 text-xs font-medium text-accent">
                         {member.user.name?.charAt(0) ||
                           member.user.email.charAt(0).toUpperCase()}
+                        <span
+                          className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full ring-2 ring-card ${
+                            member.user.is_online ? "bg-emerald-500" : "bg-muted-foreground/60"
+                          }`}
+                          title={member.user.is_online ? "Online" : "Offline"}
+                        />
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-ink truncate">

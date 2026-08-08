@@ -2,7 +2,7 @@ import { api } from "./api-client";
 
 export interface Membership {
   id: string;
-  user: { id: string; email: string; name: string };
+  user: { id: string; email: string; name: string; is_online: boolean };
   organization: string;
   role: "owner" | "admin" | "agent";
   status: "active" | "invited" | "suspended";
@@ -28,7 +28,7 @@ export interface TeamDetail extends Team {
 
 export interface TeamMembership {
   id: string;
-  user: { id: string; email: string; name: string };
+  user: { id: string; email: string; name: string; is_online: boolean };
   team: string;
   role: "admin" | "member";
   created_at: string;

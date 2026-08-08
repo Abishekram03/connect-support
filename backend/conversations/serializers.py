@@ -44,7 +44,7 @@ class ConversationListSerializer(serializers.ModelSerializer):
             "id", "ticket_id", "status", "priority", "channel", "subject",
             "customer_name", "customer_email", "customer_avatar",
             "assignee", "team", "last_message", "message_count",
-            "assigned_at", "first_response_at", "resolved_at",
+            "assigned_at", "first_response_at", "handoff_requested_at", "resolved_at",
             "sla_deadline", "sla_breached", "sla_status", "sla_time_remaining",
             "last_message_at", "created_at", "updated_at",
         ]

@@ -19,6 +19,7 @@ from .rag import (
     get_provider,
     sync_source_to_chunks,
     generate_reply,
+    generate_reply_options,
     suggest_reply,
     summarize_conversation,
     suggest_next_steps,
@@ -354,6 +355,48 @@ def widget_auto_reply(request):
 
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
+def reply_options_view(request):
+    """Generate 2 AI draft replies in the agent's preferred language."""
+    org = get_user_org(request.user)
+    if not org:
+        return Response({"detail": "No organization found"}, status=status.HTTP_400_BAD_REQUEST)
+
+    conversation_id = request.data.get("conversation_id")
+    if not conversation_id:
+        return Response({"detail": "conversation_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        conversation = Conversation.objects.get(pk=conversation_id, organization=org)
+    except Conversation.DoesNotExist:
+        return Response({"detail": "Conversation not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    config = AIConfig.objects.filter(organization=org).first()
+    if not config:
+        return Response({"detail": "AI not configured"}, status=status.HTTP_400_BAD_REQUEST)
+
+    messages = list(
+        Message.objects.filter(conversation=conversation)
+        .order_by("created_at")
+        .values("body", "is_from_customer")
+    )
+
+    try:
+        provider = get_provider(org)
+        agent_language = getattr(request.user, "language", "en") or "en"
+        human_engaged = conversation.first_response_at is not None or conversation.handoff_requested_at is not None
+        options = generate_reply_options(
+            org, messages, provider, config,
+            agent_language=agent_language,
+            human_engaged=human_engaged,
+        )
+        return Response({"options": options, "language": agent_language})
+    except Exception:
+        logger.error("Reply options error for conversation %s", conversation_id, exc_info=True)
+        return Response({"detail": "AI reply generation failed. Please try again."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
 def suggest_reply_view(request):
     """Get 3 AI-suggested replies for the current conversation."""
     org = get_user_org(request.user)
@@ -381,7 +424,8 @@ def suggest_reply_view(request):
 
     try:
         provider = get_provider(org)
-        suggestions = suggest_reply(org, messages, provider, config)
+        human_engaged = conversation.first_response_at is not None or conversation.handoff_requested_at is not None
+        suggestions = suggest_reply(org, messages, provider, config, human_engaged=human_engaged)
         return Response({"suggestions": suggestions})
     except Exception:
         logger.error("Suggest reply error for conversation %s", conversation_id, exc_info=True)

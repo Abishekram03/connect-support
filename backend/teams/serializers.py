@@ -10,7 +10,7 @@ class UserMinimalSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["id", "email", "name"]
+        fields = ["id", "email", "name", "is_online"]
 
 
 class MembershipSerializer(serializers.ModelSerializer):

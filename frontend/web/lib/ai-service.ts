@@ -93,6 +93,10 @@ export async function suggestReply(conversationId: string): Promise<{ suggestion
   return api.post("/api/ai/suggest-reply", { conversation_id: conversationId });
 }
 
+export async function generateReplyOptions(conversationId: string): Promise<{ options: string[]; language: string }> {
+  return api.post("/api/ai/reply-options", { conversation_id: conversationId });
+}
+
 export async function summarizeConversation(conversationId: string): Promise<{ summary: string }> {
   return api.post("/api/ai/summarize", { conversation_id: conversationId });
 }

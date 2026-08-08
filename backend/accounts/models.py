@@ -35,6 +35,7 @@ class User(AbstractUser):
     )
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default="agent")
     status = models.CharField(max_length=20, default="invited")
+    is_online = models.BooleanField(default=True, help_text="Presence status — offline agents are skipped by auto-assignment")
     language = models.CharField(max_length=10, default="en", help_text="Preferred language for auto-translation")
     avatar = models.ImageField(upload_to="avatars/", null=True, blank=True)
     invited_at = models.DateTimeField(auto_now_add=True, null=True)

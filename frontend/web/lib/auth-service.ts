@@ -15,6 +15,7 @@ export interface User {
   name: string;
   role: string;
   status: string;
+  is_online: boolean;
   organization: Organization;
   language: string;
   avatar_url: string | null;
@@ -138,6 +139,12 @@ export async function setupWorkspace(
 
 export async function updateProfile(name: string): Promise<User> {
   const data = await api.patch<User>("/api/auth/me", { name });
+  storeUser(data);
+  return data;
+}
+
+export async function updatePresence(isOnline: boolean): Promise<User> {
+  const data = await api.patch<User>("/api/auth/me", { is_online: isOnline });
   storeUser(data);
   return data;
 }
