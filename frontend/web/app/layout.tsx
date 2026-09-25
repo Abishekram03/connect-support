@@ -52,7 +52,7 @@ export default function RootLayout({
       <head>
         <script
           defer
-          src="https://usrly-five.vercel.app/upfront.js"
+          src="https://usrly-five.vercel.app/userly.js"
           data-domain="onconnect.one"
         />
       </head>
