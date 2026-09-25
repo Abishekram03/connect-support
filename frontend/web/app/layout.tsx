@@ -49,6 +49,13 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable}`}>
+      <head>
+        <script
+          defer
+          src="https://usrly-five.vercel.app/upfront.js"
+          data-domain="onconnect.one"
+        />
+      </head>
       <body
         suppressHydrationWarning={true}
         className="min-h-screen bg-background font-sans text-foreground antialiased"
