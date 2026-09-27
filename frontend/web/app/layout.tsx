@@ -55,6 +55,10 @@ export default function RootLayout({
           src="https://usrly-five.vercel.app/userly.js"
           data-domain="onconnect.one"
         />
+        <script type="text/usrly-block" data-category="functional">
+          {`document.cookie = "upfront_test_functional=1; path=/; max-age=31536000";
+console.log("FUNCTIONAL TEST SCRIPT EXECUTED");`}
+        </script>
       </head>
       <body
         suppressHydrationWarning={true}
