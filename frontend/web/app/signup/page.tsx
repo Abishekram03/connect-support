@@ -155,7 +155,7 @@ export default function SignUpPage() {
       footer={
         <div>
           By continuing you agree to Connect&apos;s <a href="#">Terms</a> and{" "}
-          <a href="#">Privacy Policy</a>.
+          <Link href="/privacy">Privacy Policy</Link>.
         </div>
       }
     >

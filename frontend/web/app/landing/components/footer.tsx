@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { ConnectMark } from "./connect-mark";
 
 export function Footer() {
@@ -50,7 +51,7 @@ export function Footer() {
             &copy; 2026 Connect Labs, Inc. &middot; Built for the world&apos;s support teams.
           </p>
           <div className="flex items-center gap-6 text-xs text-muted-foreground">
-            <a href="#">Privacy</a>
+            <Link href="/privacy">Privacy</Link>
             <a href="#">Terms</a>
             <a href="#">Security</a>
             <a href="#">Cookies</a>

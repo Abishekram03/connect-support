@@ -42,7 +42,7 @@ export default function SignInPage() {
         <div className="flex items-center justify-between">
           <span>© {new Date().getFullYear()} Connect Labs</span>
           <div className="flex gap-4">
-            <a href="#">Privacy</a>
+            <Link href="/privacy">Privacy</Link>
             <a href="#">Terms</a>
           </div>
         </div>
